@@ -33,8 +33,8 @@ class ElasticsearchSettings(BaseModel):
     """Elasticsearch 相关配置"""
 
     url: str
-    metadata_index: str = "file_metadatas"
-    chunk_index: str = "file_chunks"
+    metadata_index_suffix: str
+    chunk_index_suffix: str
     request_timeout: int = 15
 
 

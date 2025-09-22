@@ -33,20 +33,19 @@ repos:
         types: [python]
 
   # 4. 重要检查（仅在push时）
-  # - repo: local
-  #   hooks:
-  #     - id: pytest
-  #       name: pytest
-  #       language: system
-  #       entry: uv
-  #       args: ["run", "pytest", "-q"]
-  #       pass_filenames: false
-  #       stages: [pre-push]
-
-  #     - id: pip-audit
-  #       name: pip-audit
-  #       language: system
-  #       entry: uv
-  #       args: ["run", "pip-audit", "--strict"]
-  #       pass_filenames: false
-  #       stages: [pre-push]
+#  - repo: local
+#    hooks:
+#      - id: pytest
+#        name: pytest
+#        language: system
+#        entry: uv
+#        args: ["run", "pytest", "-q"]
+#        pass_filenames: false
+#        stages: [pre-push]
+#      - id: pip-audit
+#        name: pip-audit
+#        language: system
+#        entry: uv
+#        args: ["run", "pip-audit", "--strict"]
+#        pass_filenames: false
+#        stages: [pre-push]

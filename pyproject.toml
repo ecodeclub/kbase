@@ -89,12 +89,18 @@ module = [
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-addopts = "-q --cov=app --cov-report=term-missing --cov-report=xml --cov-report=html"
+addopts = [
+    "-q",
+    "--cov-report=term-missing",
+    "--cov-report=xml:coverage.xml",    # 指定XML报告位置
+    "--cov-report=html:htmlcov",        # 明确指定HTML报告位置
+    "--cov-branch",                     # 启用分支覆盖率
+]
 testpaths = ["tests"]
-minversion = "8.0"         # ← 添加最小版本要求
-python_files = "test_*.py" # ← 明确测试文件模式
-python_classes = "Test*"   # ← 明确测试类模式
-python_functions = "test_*" # ← 明确测试函数模式
+minversion = "8.0"
+python_files = "*_test.py"
+python_classes = "Test*"
+python_functions = "test_*"
 
 [tool.uv]
 required-environments = [

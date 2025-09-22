@@ -1,0 +1,18 @@
+[run]
+source = app
+omit =
+    */__init__.py
+    */tests/*
+    */__pycache__/*
+    app/main.py
+    app/config/settings.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    if self.debug:
+    raise AssertionError
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:

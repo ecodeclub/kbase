@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from elasticsearch import Elasticsearch
 from fastapi.testclient import TestClient
 from qcloud_cos import CosS3Client  # type: ignore[import-untyped]
 
@@ -52,3 +53,28 @@ def client() -> Generator[TestClient, Any, None]:
     """V2 API 测试客户端"""
     with TestClient(app) as test_client:
         yield test_client
+
+
+@pytest.fixture(scope="session")
+def es_client() -> Generator[Elasticsearch, Any, None]:
+    """
+    Elasticsearch客户端 - 用于测试ES相关操作
+    """
+    client = Elasticsearch(
+        hosts=[{"host": "localhost", "port": 9200, "scheme": "http"}],
+        request_timeout=100,
+        retry_on_timeout=True,
+        # 如果有认证信息也要添加
+    )
+    # 测试连接
+    try:
+        info = client.info()
+        logger.info(
+            f"✅ 成功连接到Elasticsearch服务: {info['version']['number']}"
+        )
+        yield client
+    except Exception as e:
+        logger.error(f"❌ 无法连接到Elasticsearch: {e}")
+        pytest.fail("Elasticsearch服务不可用")
+    finally:
+        client.close()

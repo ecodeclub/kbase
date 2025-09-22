@@ -10,17 +10,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from dataclasses import dataclass, field
-from typing import Any
+from fastapi.testclient import TestClient
 
 
-@dataclass
-class Document:
-    index_prefix: str
-    path: str
-    size: int
-    category: str | None = None
-    tags: list[str] = field(default_factory=list)
-    encoding: str | None = "utf-8"
-    loader_args: dict[str, Any] | None = field(default_factory=dict)
-    id: str | None = None
+class TestHealthEndpoint:
+    def test_health_check_endpoint(self, client: TestClient) -> None:
+        """测试API健康检查端点"""
+        print("\n🏥 测试健康检查端点...")
+        response = client.get("/api/v1/health")
+        assert response.status_code == 200
+
+        health_data = response.json()
+        assert health_data["status"] == "healthy"
+        print("✅ 健康检查端点正常")

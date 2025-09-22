@@ -12,30 +12,54 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 
 
+class SearchMode(str, Enum):
+    """基础查询模式"""
+
+    VECTOR = "vector"  # 向量搜索
+    TERM = "term"  # 精确匹配
+    MATCH = "match"  # 模糊匹配
+
+
+@dataclass(frozen=True)
+class SearchCondition:
+    """搜索条件 - 值对象"""
+
+    field_name: str
+    mode: SearchMode
+    value: str | int | float | bool
+
+
+@dataclass(frozen=True)
+class SearchParameters:
+    """搜索参数 - 值对象"""
+
+    index_name: str
+    conditions: list[SearchCondition]
+    limit: int = 10
+    filters: dict[str, Any] | None = None
+
+
 @dataclass
-class SearchRequest:
-    """封装搜索请求，新增 mode 和 filters。"""
+class DocumentResult:
+    """文档结果 - 值对象"""
 
-    query: str
-    top_k: int = 5
-    filters: dict[str, Any] | None = field(default_factory=dict)
-
-
-@dataclass
-class ContextChunk:
-    """定义一个上下文块，用于最终返回结果。"""
-
-    text: str
-    file_metadata_id: str
+    content: dict[str, Any]
     score: float
+    id: str | None = None
 
 
 @dataclass
-class SearchResponse:
-    """定义最终的搜索响应格式。"""
+class SearchResult:
+    """搜索结果 - 聚合根"""
 
-    context: list[ContextChunk]
+    documents: list[DocumentResult]
+    total_count: int
+    search_time_ms: int
+
+    def is_empty(self) -> bool:
+        return len(self.documents) == 0
