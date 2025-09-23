@@ -1,0 +1,32 @@
+elasticsearch:
+  url: "http://localhost:9200"
+  metadata_index: "knowledge_base_metadatas"
+  chunk_index: "knowledge_base_chunks"
+  request_timeout: 60
+
+embedder:
+  model_name: "shibing624/text2vec-base-chinese" # "BAAI/bge-base-zh-v1.5"
+  dimensions: 768
+  similarity_metric: "cosine"
+  index_type: "int8_hnsw" # 可选: "int8_hnsw", "hnsw", "flat"
+
+reranker:
+  model_name: "BAAI/bge-reranker-base"
+
+splitter:
+  chunk_size: 500
+  chunk_overlap: 50
+
+storage:
+  local_path: "/tmp/kbase_uploads"
+
+upload:
+  max_file_size_mb: 50
+  supported_file_extensions:
+    - ".pdf"
+    - ".md"
+    - ".txt"
+retrieval:
+  multiplier: 5        # 召回倍数配置
+  vector_weight: 2.0   # 向量搜索权重
+  text_weight: 1.0     # 文本搜索权重

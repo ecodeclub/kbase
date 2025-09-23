@@ -1,0 +1,103 @@
+[project]
+name = "kbase"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "cos-python-sdk-v5>=1.9.38",
+    "elasticsearch>=9.1.0",
+    "fastapi>=0.116.1",
+    "gunicorn>=23.0.0",
+    "langchain>=0.3.27",
+    "langchain-community>=0.3.29",
+    "mistune>=3.1.4",
+    "numpy>=1.24,<2.0",
+    "pdfplumber>=0.11.7",
+    "pydantic-settings>=2.10.1",
+    "pypdf>=6.0.0",
+    "python-multipart>=0.0.20",
+    "pyyaml>=6.0.2",
+    "scipy>=1.16.1",
+    "sentence-transformers>=2.3.0,<2.7.0",
+    "torch>=2.1.0",
+    "transformers>=4.35.0,<4.50.0",
+    "unstructured[docx,pdf,pptx,xlsx]>=0.18.14",
+    "uvicorn>=0.35.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "mypy>=1.17.1",
+    "pip-audit>=2.9.0",
+    "pre-commit>=4.3.0",
+    "pyclean>=3.1.0",
+    "pytest>=8.4.2",
+    "pytest-cov>=6.3.0",
+    "ruff>=0.12.12",
+    "types-pyyaml>=6.0.12.20250822",
+    "types-requests>=2.32.4.20250809",
+    "types-setuptools>=80.9.0.20250822",
+]
+
+[tool.ruff]
+line-length = 80
+target-version = "py312"
+lint.extend-select = [
+    "B",    # flake8-bugbear
+    "I",    # isort
+    "UP",   # pyupgrade
+    "S",    # flake8-bandit
+    "ANN",  # flake8-annotations (类型注解检查)
+    "TCH",  # flake8-type-checking (类型导入优化)
+    "FA",   # flake8-future-annotations
+]
+lint.extend-ignore = [
+    "S101",    # 允许使用assert（测试中常用）
+    "B008",    # 允许函数默认参数中调用函数（FastAPI依赖注入模式）
+]
+
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+# 类型注解相关配置
+[tool.ruff.lint.flake8-annotations]
+allow-star-arg-any = false      # 不允许*args: Any
+ignore-fully-untyped = false    # 检查所有无类型函数
+suppress-dummy-args = false     # 检查虚拟参数
+suppress-none-returning = false # 检查返回None的函数
+
+[tool.ruff.lint.flake8-type-checking]
+strict = true                   # 严格的类型导入检查
+
+[tool.mypy]
+python_version = "3.12"
+packages = ["app", "tests"]
+strict = true
+warn_unreachable = true           # 警告无法到达的代码
+warn_no_return = true             # 警告缺少return语句
+no_implicit_optional = true       # 禁止隐式Optional
+
+# 针对特定模块的配置
+[[tool.mypy.overrides]]
+module = [
+    "sentence_transformers.*",
+    "langchain.*",
+    "pdfplumber.*",
+    "numpy.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+addopts = "-q --cov=app --cov-report=term-missing --cov-report=xml --cov-report=html"
+testpaths = ["tests"]
+minversion = "8.0"         # ← 添加最小版本要求
+python_files = "test_*.py" # ← 明确测试文件模式
+python_classes = "Test*"   # ← 明确测试类模式
+python_functions = "test_*" # ← 明确测试函数模式
+
+[tool.uv]
+required-environments = [
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sys_platform == 'darwin' and platform_machine == 'x86_64'"
+]

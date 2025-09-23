@@ -1,0 +1,52 @@
+repos:
+  # 1. 代码格式化（必须最先）- 使用项目环境确保版本一致
+  - repo: local
+    hooks:
+      - id: ruff-format
+        name: ruff format
+        language: system
+        entry: uv
+        args: ["run", "ruff", "format", "."]
+        pass_filenames: false
+        types: [python]
+
+  # 2. 代码检查和自动修复 - 使用项目环境确保版本一致  
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        language: system
+        entry: uv
+        args: ["run", "ruff", "check", ".", "--fix"]
+        pass_filenames: false
+        types: [python]
+
+  # 3. 类型检查（在代码修复后）
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        language: system
+        entry: uv
+        args: ["run", "mypy", "app", "tests"]
+        pass_filenames: false
+        types: [python]
+
+  # 4. 重要检查（仅在push时）
+  # - repo: local
+  #   hooks:
+  #     - id: pytest
+  #       name: pytest
+  #       language: system
+  #       entry: uv
+  #       args: ["run", "pytest", "-q"]
+  #       pass_filenames: false
+  #       stages: [pre-push]
+
+  #     - id: pip-audit
+  #       name: pip-audit
+  #       language: system
+  #       entry: uv
+  #       args: ["run", "pip-audit", "--strict"]
+  #       pass_filenames: false
+  #       stages: [pre-push]
