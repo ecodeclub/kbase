@@ -1,5 +1,12 @@
 elasticsearch:
   url: "http://localhost:9200"
+  number_of_shards: 1
+  number_of_replicas: 0
+  index_max_result_window: 10000
+  index_refresh_interval: 1s
+  index_option_type: "int8_hnsw"
+  index_option_m: 32 # 控制HNSW图中每个节点可以连接的最大邻居节点数量
+  index_option_ef_construction: 100 # 索引构建时每个节点考虑的候选邻居数量，影响索引质量。
   metadata_index_suffix: "_metadatas"
   chunk_index_suffix: "_chunks"
   request_timeout: 60
@@ -26,7 +33,12 @@ upload:
     - ".pdf"
     - ".md"
     - ".txt"
+
 retrieval:
   multiplier: 5        # 召回倍数配置
   vector_weight: 2.0   # 向量搜索权重
+  vector_similarity: 0.1 # 向量搜索相似度阈值
   text_weight: 1.0     # 文本搜索权重
+
+search:
+  max_top_k: 50        # 最大top_k值限制

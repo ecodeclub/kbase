@@ -15,7 +15,6 @@
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import overload
 
 import pytest
 from elasticsearch import Elasticsearch
@@ -33,41 +32,6 @@ class TestUploadEndpoint:
     # 数据隔离：两个接口使用不同的索引前缀
     FILE_UPLOAD_INDEX_PREFIX = "test_file_upload"
     URL_UPLOAD_INDEX_PREFIX = "test_url_upload"
-
-    @pytest.fixture(scope="class")
-    def user_upload_dir(self) -> Path:
-        """提供 '用户准备上传' 的文件目录路径。"""
-        path = (
-            Path(__file__).parent.parent.parent / "fixtures" / "files" / "user"
-        )
-        path.mkdir(exist_ok=True, parents=True)
-        return path
-
-    @pytest.fixture(scope="class")
-    def get_user_upload_file(
-        self, user_upload_dir: Path
-    ) -> Callable[[str | list[str]], Path | list[Path]]:
-        """从 'user' 目录轻松获取文件路径。"""
-
-        @overload
-        def _builder(file_names: str) -> Path: ...
-
-        @overload  # noqa: F811
-        def _builder(file_names: list[str]) -> list[Path]: ...
-
-        def _builder(file_names: str | list[str]) -> Path | list[Path]:  # noqa: F811
-            if isinstance(file_names, str):
-                path = user_upload_dir / file_names
-                if not path.exists():
-                    raise FileNotFoundError(f"源文件不存在: {path}")
-                return path
-
-            paths = [user_upload_dir / name for name in file_names]
-            if not all(p.exists() for p in paths):
-                raise FileNotFoundError("一个或多个源文件不存在。")
-            return paths
-
-        return _builder  # type: ignore[return-value]
 
     @staticmethod
     def _get_metadata_index_name(index_prefix: str) -> str:

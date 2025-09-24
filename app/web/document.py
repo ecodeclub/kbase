@@ -19,6 +19,7 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
+from elasticsearch import NotFoundError
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -426,6 +427,10 @@ class DocumentHandler:
                 f"✅ 搜索完成, 返回{len(domain_response.documents)}条结果"
             )
             return resp
+        except NotFoundError as e:
+            raise HTTPException(
+                status_code=404, detail=f"索引 {request.query.index} 不存在"
+            ) from e
         except Exception as e:
             logger.error(f"❌ 搜索失败: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail="搜索处理失败") from e
