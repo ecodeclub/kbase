@@ -115,7 +115,7 @@ _check_python:
 
 .PHONY: docker_build
 docker_build:
-	docker build -t kbase:latest .
+	docker build -t flycash/kbase:latest .
 
 .PHONY: docker_run
-	docker run
+	docker rm kbase && docker run --name kbase -p 8082:8082 --env-file .env flycash/kbase:latest
