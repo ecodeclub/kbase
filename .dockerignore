@@ -1,0 +1,10 @@
+.env
+__pycache__/
+*.pyc
+.git
+.gitignore
+.github
+.script
+.venv
+tests
+.pre-commit-config.yaml

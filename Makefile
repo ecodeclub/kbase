@@ -112,3 +112,10 @@ _check_python:
 		fi; \
 		echo "✅ Python ${PYTHON_VERSION_TARGET} 安装成功。"; \
 	fi
+
+.PHONY: docker_build
+docker_build:
+	docker build -t kbase:latest .
+
+.PHONY: docker_run
+	docker run

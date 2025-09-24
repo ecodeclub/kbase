@@ -283,3 +283,10 @@ make check  # 自动格式化和修复大部分问题
 ---
 
 💡 **提示**: 使用 `make help` 查看所有可用命令
+
+## Docker 镜像和部署
+Docker 打包的时候，忽略掉了很多文件，具体可以参考项目下的 .dockerignore 文件。
+
+因此在使用 docker 来部署的时候，必须挂载：
+- .env 文件
+- config.yaml 文件

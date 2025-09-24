@@ -81,6 +81,9 @@ class DocumentHandler:
         self._task_status: dict[str, str] = {}
 
     def register_routes(self) -> None:
+        self._router.get("/hello", summary="健康检查接口")(
+            lambda: {"message": "Hello, KBase RAG!"}
+        )
         """将本处理器中的所有API端点注册到构造时传入的路由器上。"""
         self._router.post(
             "/documents/upload-file",

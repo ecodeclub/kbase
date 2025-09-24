@@ -1,5 +1,5 @@
 elasticsearch:
-  url: "http://localhost:9200"
+  url: "http://local.ubuntu:9200"
   metadata_index: "knowledge_base_metadatas"
   chunk_index: "knowledge_base_chunks"
   request_timeout: 60
