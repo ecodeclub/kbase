@@ -20,6 +20,8 @@ from typing import Any
 from pydantic import BaseModel, Field, HttpUrl, Json, field_validator
 from pydantic_core.core_schema import ValidationInfo
 
+from app.config.settings import settings
+
 
 class FileUploadResponse(BaseModel):
     """文件上传后的标准响应模型"""
@@ -75,6 +77,16 @@ class Condition(BaseModel):
         ..., description="字段值，支持多种类型"
     )
 
+    @field_validator("value")
+    @classmethod
+    def validate_value_not_empty_string(
+        cls, v: str | int | float | bool
+    ) -> str | int | float | bool:
+        """验证字符串值不能为空"""
+        if isinstance(v, str) and v.strip() == "":
+            raise ValueError("字符串类型的查询值不能为空")
+        return v
+
 
 class Query(BaseModel):
     """查询对象"""
@@ -93,13 +105,16 @@ class SearchRequest(BaseModel):
 
     type: SearchType = Field(..., description="搜索类型")
     query: Query = Field(..., description="查询条件")
-    top_k: int = Field(..., ge=1, description="返回结果数量，至少为1")
+    top_k: int = Field(
+        ...,
+        ge=1,
+        le=settings.search.max_top_k,
+        description="返回结果数量 1 <= top_k <= 配置文件中的max_top_k",
+    )
 
     @field_validator("query")
     @classmethod
-    def validate_query_for_search_type(
-        cls, v: Query, info: ValidationInfo
-    ) -> Query:
+    def validate_query(cls, v: Query, info: ValidationInfo) -> Query:
         """根据搜索类型验证查询条件"""
         search_type = info.data.get("type")
 
@@ -134,7 +149,6 @@ class StructuredSearchResult(BaseModel):
 class SearchResponse(BaseModel):
     """搜索响应"""
 
-    type: SearchType = Field(..., description="搜索类型")  # 保持一致性
     results: list[VectorHybridSearchResult | StructuredSearchResult] = Field(
         default_factory=list, description="搜索结果"
     )

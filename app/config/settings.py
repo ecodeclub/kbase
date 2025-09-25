@@ -33,6 +33,13 @@ class ElasticsearchSettings(BaseModel):
     """Elasticsearch 相关配置"""
 
     url: str
+    number_of_shards: int
+    number_of_replicas: int
+    index_max_result_window: int
+    index_refresh_interval: str
+    index_option_type: str
+    index_option_m: int
+    index_option_ef_construction: int
     metadata_index_suffix: str
     chunk_index_suffix: str
     request_timeout: int = 15
@@ -44,7 +51,6 @@ class EmbedderSettings(BaseModel):
     model_name: str
     dimensions: int
     similarity_metric: str
-    index_type: str
 
 
 class RerankerSettings(BaseModel):
@@ -82,7 +88,14 @@ class RetrievalSettings(BaseModel):
 
     multiplier: int = Field(5, description="召回倍数配置")
     vector_weight: float = Field(2.0, description="向量搜索权重")
+    vector_similarity: float = Field(0.7, description="相似度")
     text_weight: float = Field(1.0, description="文本搜索权重")
+
+
+class SearchSettings(BaseModel):
+    """搜索相关配置"""
+
+    max_top_k: int = Field(50, description="最大top_k值限制")
 
 
 class TencentOssSettings(BaseModel):
@@ -114,6 +127,7 @@ class Settings(BaseSettings):
     storage: StorageSettings
     upload: UploadSettings
     retrieval: RetrievalSettings
+    search: SearchSettings
 
     @property
     def cos_config(self) -> CosConfig:

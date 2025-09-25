@@ -97,11 +97,11 @@ class ElasticsearchService:
         if not self._client.indices.exists(index=metadata_index):
             body = {
                 "settings": {
-                    "number_of_shards": 1,
-                    "number_of_replicas": 0,
+                    "number_of_shards": self._settings.elasticsearch.number_of_shards,
+                    "number_of_replicas": self._settings.elasticsearch.number_of_replicas,
                     "index": {
-                        "max_result_window": 10000,
-                        "refresh_interval": "1s",
+                        "max_result_window": self._settings.elasticsearch.index_max_result_window,
+                        "refresh_interval": self._settings.elasticsearch.index_refresh_interval,
                     },
                 },
                 "mappings": {
@@ -138,11 +138,11 @@ class ElasticsearchService:
         if not self._client.indices.exists(index=chunk_index):
             body = {
                 "settings": {
-                    "number_of_shards": 1,
-                    "number_of_replicas": 0,
+                    "number_of_shards": self._settings.elasticsearch.number_of_shards,
+                    "number_of_replicas": self._settings.elasticsearch.number_of_replicas,
                     "index": {
-                        "max_result_window": 10000,
-                        "refresh_interval": "1s",
+                        "max_result_window": self._settings.elasticsearch.index_max_result_window,
+                        "refresh_interval": self._settings.elasticsearch.index_refresh_interval,
                     },
                 },
                 "mappings": {
@@ -159,9 +159,9 @@ class ElasticsearchService:
                             "similarity": self._embedder.similarity_metric,
                             "index": True,
                             "index_options": {
-                                "type": self._settings.embedder.index_type,
-                                "m": 32,
-                                "ef_construction": 100,
+                                "type": self._settings.elasticsearch.index_option_type,
+                                "m": self._settings.elasticsearch.index_option_m,
+                                "ef_construction": self._settings.elasticsearch.index_option_ef_construction,
                             },
                         },
                         "chunk_index": {"type": "integer"},
@@ -207,7 +207,9 @@ class ElasticsearchService:
         metadata_index, chunk_index = self._ensure_indexes_exist(
             document.index_prefix
         )
-
+        logger.info(
+            f"向量混合搜索： 元数据索引名={metadata_index} 分片索引名={chunk_index}"
+        )
         metadata_id = self._create_metadata(metadata_index, document)
         document.id = metadata_id  # 确保 document 对象持有 ID
         logger.info(f"元数据占位符创建成功，ID: {metadata_id}")
@@ -359,10 +361,11 @@ class ElasticsearchService:
             )
 
         # 执行ES搜索
+        logger.info(f"在 {parameters.index_name} 上执行查询: {search_body}")
         response = self._client.search(
             index=parameters.index_name, body=search_body
         )
-
+        logger.info(f"查询结果: {response}")
         # 计算搜索耗时
         search_time_ms = int((time.time() - start_time) * 1000)
 
@@ -416,57 +419,57 @@ class ElasticsearchService:
             ES查询体
         """
         # 获取文本查询进行向量化
-        text_query: str | None = None
-        for condition in search_conditions["vector"]:
-            if isinstance(condition.value, str):
-                text_query = condition.value
-        if not text_query:
-            raise ValueError("向量混合搜索需要文本查询内容")
+        text_query = cast("str", search_conditions["vector"][0].value)
 
         # 生成查询向量
         query_vector = self._embedder.embed_documents([text_query])[0]
 
         # 计算召回数量（用于后续重排序）
-        retrieval_size = parameters.limit * self._settings.retrieval.multiplier
+        k = parameters.limit * self._settings.retrieval.multiplier
+        vector_similarity = self._settings.retrieval.vector_similarity
 
         # 获取权重配置
         vector_weight = self._settings.retrieval.vector_weight
         text_weight = self._settings.retrieval.text_weight
 
+        # # 确保 num_candidates 至少为 k 的 2 倍或 100，取较大值
+        num_candidates = max(k * 2, 100)
+
         # 构建混合搜索查询体
         search_body: dict[str, Any] = {
-            "size": retrieval_size,
+            "size": parameters.limit,
             "_source": ["content", "file_metadata_id"],  # 只返回需要的字段
             "knn": {
                 "field": "content_vector",  # 固定向量字段
                 "query_vector": query_vector,
-                "k": retrieval_size,
-                "num_candidates": 100,
+                "k": k,
+                "num_candidates": num_candidates,
                 "boost": vector_weight,
+                "similarity": vector_similarity,
             },
             "query": {
                 "bool": {
-                    "should": [
-                        # 普通匹配
+                    "must": [
                         {
                             "match": {
                                 "content": {
                                     "query": text_query,
-                                    "boost": text_weight * 0.5,
+                                    "boost": text_weight * 0.7,  # 基础匹配权重
                                 }
                             }
-                        },
-                        # 短语匹配
+                        }
+                    ],
+                    "should": [
                         {
                             "match_phrase": {
                                 "content": {
                                     "query": text_query,
-                                    "boost": text_weight * 0.3,
+                                    "boost": text_weight * 0.3,  # 短语匹配加分
                                 }
                             }
-                        },
+                        }
                     ],
-                    "minimum_should_match": 0,
+                    "minimum_should_match": 0,  # should是纯加分项
                 }
             },
         }
@@ -554,7 +557,7 @@ class ElasticsearchService:
         # 根据搜索类型处理结果
         if is_hybrid_search:
             documents = self._process_hybrid_search_results(
-                cast("str", search_conditions["vector"][0].value), hits, limit
+                cast("str", search_conditions["vector"][0].value), hits
             )
         else:
             documents = self._process_structured_search_results(hits)
@@ -569,7 +572,6 @@ class ElasticsearchService:
         self,
         text_query: str,
         hits: list[dict[str, Any]],
-        limit: int,
     ) -> list[DocumentResult]:
         """
         处理混合搜索结果：去重 + 重排序
@@ -603,7 +605,7 @@ class ElasticsearchService:
                 unique_chunks.append(chunk)
 
         # 重排
-        return self._reranker.rerank(text_query, unique_chunks)[:limit]
+        return self._reranker.rerank(text_query, unique_chunks)
 
     @staticmethod
     def _process_structured_search_results(

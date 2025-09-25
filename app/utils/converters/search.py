@@ -58,9 +58,11 @@ class SearchConverter:
             conditions = [
                 SearchCondition(
                     field_name=cond.field,
-                    mode=SearchMode.TERM
-                    if cond.op == ConditionOperator.TERM
-                    else SearchMode.MATCH,
+                    mode=(
+                        SearchMode.TERM
+                        if cond.op == ConditionOperator.TERM
+                        else SearchMode.MATCH
+                    ),
                     value=cond.value,
                 )
                 for cond in request.query.conditions
@@ -83,7 +85,7 @@ class SearchConverter:
         if search_type == SearchType.VECTOR_HYBRID:
             results = [
                 VectorHybridSearchResult(
-                    text=doc.content.get("text", ""),
+                    text=doc.content.get("content", ""),
                     file_metadata_id=doc.content.get("file_metadata_id", ""),
                     score=doc.score,
                 )
@@ -100,4 +102,4 @@ class SearchConverter:
                 if doc.id
             ]
 
-        return SearchResponse(type=search_type, results=results)
+        return SearchResponse(results=results)
