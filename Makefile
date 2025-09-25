@@ -118,3 +118,10 @@ _check_python:
 		fi; \
 		echo "✅ Python ${PYTHON_VERSION_TARGET} 安装成功。"; \
 	fi
+
+.PHONY: docker_build
+docker_build:
+	docker build -t flycash/kbase:latest .
+
+.PHONY: docker_run
+	docker rm kbase && docker run --name kbase -p 8082:8082 --env-file .env flycash/kbase:latest
