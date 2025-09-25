@@ -30,7 +30,7 @@ from app.utils.embedders.sentence_transformer import SentenceTransformerEmbedder
 from app.utils.loaders.dispatcher import DispatcherLoader
 from app.utils.rerankers.bge import BgeReranker
 from app.utils.splitters import RecursiveCharacterTextSplitter
-from app.web.handler import DocumentHandler
+from app.web.document import DocumentHandler
 
 # 配置标准日志
 logging.basicConfig(
@@ -62,8 +62,6 @@ try:
         splitter=splitter,
         embedder=embedder,
         reranker=reranker,
-        metadata_index=settings.elasticsearch.metadata_index,
-        chunk_index=settings.elasticsearch.chunk_index,
         settings=settings,
     )
     logger.info("✅ 核心服务组件初始化成功。")

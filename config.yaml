@@ -1,7 +1,7 @@
 elasticsearch:
   url: "http://localhost:9200"
-  metadata_index: "knowledge_base_metadatas"
-  chunk_index: "knowledge_base_chunks"
+  metadata_index_suffix: "_metadatas"
+  chunk_index_suffix: "_chunks"
   request_timeout: 60
 
 embedder:

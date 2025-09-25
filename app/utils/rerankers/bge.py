@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from app.domain.search import ContextChunk
+from app.domain.search import DocumentResult
 
 
 class BgeReranker:
@@ -32,31 +32,32 @@ class BgeReranker:
         print(f"BGE Reranker loaded with model: {model_name}")
 
     def rerank(
-        self, query: str, results: list[ContextChunk]
-    ) -> list[ContextChunk]:
+        self, query: str, results: list[DocumentResult]
+    ) -> list[DocumentResult]:
         if not query or not results:
             return results
 
         # 创建副本，避免修改原始对象
         results_copy = [
-            ContextChunk(
-                text=chunk.text,
-                file_metadata_id=chunk.file_metadata_id,
-                score=chunk.score,
+            DocumentResult(
+                id=doc.id,
+                content=doc.content,
+                score=doc.score,
             )
-            for chunk in results
+            for doc in results
         ]
 
         # 使用模型计算得分
-        # show_progress_bar=False 在生产环境中是很好的实践
-        sentence_pairs = [[query, chunk.text] for chunk in results_copy]
+        sentence_pairs = [
+            [query, chunk.content.get("content", "")]
+            for chunk in results_copy  # 安全获取字段
+        ]
         scores = self.model.predict(sentence_pairs, show_progress_bar=False)
 
-        # 将新的 rerank 分数附加到每个 chunk 上
-        for chunk, score in zip(results, scores, strict=True):
-            chunk.score = float(score)
+        # 将新的rerank分数赋给副本
+        for doc, score in zip(results_copy, scores, strict=True):
+            doc.score = float(score)
 
-        # 根据新的 rerank 分数降序排序
-        results.sort(key=lambda x: x.score, reverse=True)
-
-        return results
+        # 根据新的rerank分数降序排序并返回副本
+        results_copy.sort(key=lambda x: x.score, reverse=True)
+        return results_copy
