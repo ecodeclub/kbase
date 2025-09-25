@@ -1,3 +1,5 @@
+# Copyright 2021 ecodeclub
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -10,17 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from dataclasses import dataclass, field
-from typing import Any
+"""
+嵌入器包
+"""
 
+from .search import SearchConverter
 
-@dataclass
-class Document:
-    index_prefix: str
-    path: str
-    size: int
-    category: str | None = None
-    tags: list[str] = field(default_factory=list)
-    encoding: str | None = "utf-8"
-    loader_args: dict[str, Any] | None = field(default_factory=dict)
-    id: str | None = None
+__all__ = ["SearchConverter"]

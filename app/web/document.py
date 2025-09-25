@@ -19,6 +19,7 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
+from elasticsearch import NotFoundError
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -34,10 +35,14 @@ from qcloud_cos import CosS3Client  # type: ignore[import-untyped]
 
 from app.config.settings import Settings
 from app.domain.document import Document
-from app.domain.search import SearchRequest, SearchResponse
 from app.service.elasticsearch import ElasticsearchService
+from app.utils.converters import SearchConverter
 from app.web.vo import (
     FileUploadResponse,
+    SaveRequest,
+    SaveResponse,
+    SearchRequest,
+    SearchResponse,
     UrlUploadRequest,
     UrlUploadResponse,
 )
@@ -85,23 +90,6 @@ class DocumentHandler:
             lambda: {"message": "Hello, KBase RAG!"}
         )
         """将本处理器中的所有API端点注册到构造时传入的路由器上。"""
-        self._router.post(
-            "/documents/upload-file",
-            response_model=FileUploadResponse,
-            summary="通过文件上传进行索引",
-        )(self.upload_file)
-
-        self._router.post(
-            "/documents/upload-from-url",
-            response_model=UrlUploadResponse,
-            summary="通过腾讯云COS URL下载并进行索引",
-        )(self.upload_from_url)
-
-        self._router.post(
-            "/search",
-            response_model=SearchResponse,
-            summary="在知识库中进行搜索",
-        )(self.search)
 
         self._router.get("/health", summary="健康检查")(DocumentHandler.health)
 
@@ -110,6 +98,40 @@ class DocumentHandler:
             summary="查询任务状态",
         )(self.get_task_status)
 
+        self._router.post(
+            "/documents/upload-file",
+            response_model=FileUploadResponse,
+            summary="通过文件上传进行索引，可以假定索引已提前建好，只需要用前后缀拼接得到完整索引名称即可",
+        )(self.upload_file)
+
+        self._router.post(
+            "/documents/upload-from-url",
+            response_model=UrlUploadResponse,
+            summary="通过腾讯云COS URL下载并进行索引，可以假定索引已提前建好，只需要用前后缀拼接得到完整索引名称即可",
+        )(self.upload_from_url)
+
+        self._router.post(
+            "/search",
+            response_model=SearchResponse,
+            summary="在知识库中进行搜索",
+        )(self.search)
+
+        self._router.post(
+            "/documents/save",
+            response_model=SaveResponse,
+            summary="保存JSON格式文档到指定的Elasticsearch索引",
+        )(self.save)
+
+    @staticmethod
+    async def health() -> dict[str, str]:
+        """健康检查接口。"""
+        return {"status": "healthy"}
+
+    async def get_task_status(self, task_id: str) -> dict[str, str]:
+        """查询任务状态"""
+        status = self._task_status.get(task_id, "not_found")
+        return {"task_id": task_id, "status": status}
+
     def _process_and_cleanup(
         self, task_id: str, temp_dir: Path, document: Document
     ) -> None:
@@ -117,7 +139,7 @@ class DocumentHandler:
         self._task_status[task_id] = "processing"
         try:
             logger.info(f"后台任务开始处理: {document.path}")
-            self._service.store(document)
+            self._service.store_for_vector_hybrid_search(document)
             logger.info(f"✅ 后台任务成功处理文件: {document.path}")
             self._task_status[task_id] = "completed"
         except Exception as e:
@@ -145,9 +167,12 @@ class DocumentHandler:
     async def upload_file(
         self,
         background_tasks: BackgroundTasks,
-        file: UploadFile = File(...),
-        category: str | None = Form(None),
-        tags: str | None = Form(None),
+        index_prefix: str = Form(
+            ..., min_length=1, description="索引完整名称前缀"
+        ),
+        file: UploadFile = File(..., description="上传的文件"),
+        category: str | None = Form(None, description="分类"),
+        tags: str | None = Form(None, description="标签"),
     ) -> FileUploadResponse:
         """从用户上传的文件创建并索引文档"""
         if not file.filename:
@@ -182,6 +207,11 @@ class DocumentHandler:
 
         try:
             content = await file.read()
+
+            if len(content) == 0:
+                shutil.rmtree(temp_dir)
+                raise HTTPException(status_code=400, detail="不能上传空文件")
+
             # 双重检查（防止file.size不准确的情况）
             if len(content) > self._max_file_size_bytes:
                 shutil.rmtree(temp_dir)
@@ -202,6 +232,7 @@ class DocumentHandler:
 
         tag_list = [tag.strip() for tag in tags.split(",")] if tags else []
         document = Document(
+            index_prefix=index_prefix,
             path=str(file_path.resolve()),
             size=file_size,
             category=category,
@@ -296,32 +327,11 @@ class DocumentHandler:
         except HTTPException:
             raise
         except Exception as e:
-            error_str = str(e)
             logger.error(f"获取COS对象元数据失败: {e}", exc_info=True)
-
-            # 如果是权限问题，优雅降级：返回默认值，稍后从下载的文件获取实际大小
-            if "AccessDenied" in error_str:
-                logger.warning(
-                    f"COS权限不足，无法获取对象元数据: {cos_key}，将在下载后获取文件信息"
-                )
-                return 0, None, []  # 返回占位符：大小=0, 无category, 无tags
-
-            # 其他错误照常处理
-            elif "NoSuchKey" in error_str or "NoSuchBucket" in error_str:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"COS中未找到指定对象: {cos_key}",
-                ) from e
-            elif "timeout" in error_str.lower():
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"连接COS超时: {cos_key}",
-                ) from e
-            else:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"获取COS对象元数据失败: {cos_key}",
-                ) from e
+            raise HTTPException(
+                status_code=500,
+                detail=f"获取COS对象元数据失败: {cos_key}",
+            ) from e
 
     async def _download_cos_file(
         self, cos_key: str, file_path: Path, temp_dir: Path
@@ -343,29 +353,10 @@ class DocumentHandler:
             )
         except Exception as e:
             shutil.rmtree(temp_dir)
-            error_str = str(e)
             logger.error(f"从COS下载文件失败: {e}", exc_info=True)
-
-            # 根据具体错误类型返回不同的HTTP状态码
-            if "AccessDenied" in error_str:
-                raise HTTPException(
-                    status_code=403,
-                    detail=f"无权限下载COS对象，请检查访问密钥权限: {cos_key}",
-                ) from e
-            elif "NoSuchKey" in error_str:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"COS中未找到指定对象: {cos_key}",
-                ) from e
-            elif "timeout" in error_str.lower():
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"下载COS对象超时: {cos_key}",
-                ) from e
-            else:
-                raise HTTPException(
-                    status_code=500, detail=f"从COS下载文件失败: {cos_key}"
-                ) from e
+            raise HTTPException(
+                status_code=500, detail=f"从COS下载文件失败：{cos_key}"
+            ) from e
 
     async def upload_from_url(
         self, request: UrlUploadRequest, background_tasks: BackgroundTasks
@@ -410,6 +401,7 @@ class DocumentHandler:
 
         # 7. 创建Document并添加后台任务
         document = Document(
+            index_prefix=request.index_prefix,
             path=str(file_path.resolve()),
             size=file_size,
             category=category,
@@ -424,23 +416,53 @@ class DocumentHandler:
         """文档搜索接口"""
         try:
             logger.info(
-                f"🔍 收到搜索请求: query='{request.query}', top_k={request.top_k}, filters={request.filters}"
+                f"🔍 收到搜索请求: type='{request.type}', query='{request.query}', top_k={request.top_k}"
             )
-            domain_response = self._service.search(request)
+
+            domain_response = self._service.search(
+                SearchConverter.request_vo_to_domain(request)
+            )
+
+            resp = SearchConverter.result_domain_to_vo(
+                domain_response, request.type
+            )
             logger.info(
-                f"✅ 搜索完成, 返回{len(domain_response.context)}条结果"
+                f"✅ 搜索完成, 返回{len(domain_response.documents)}条结果"
             )
-            return domain_response
+            return resp
+        except NotFoundError as e:
+            raise HTTPException(
+                status_code=404, detail=f"索引 {request.query.index} 不存在"
+            ) from e
         except Exception as e:
             logger.error(f"❌ 搜索失败: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail="搜索处理失败") from e
 
-    @staticmethod
-    async def health() -> dict[str, str]:
-        """健康检查接口。"""
-        return {"status": "healthy"}
+    async def save(self, request: SaveRequest) -> SaveResponse:
+        """保存JSON格式文档到指定的Elasticsearch索引"""
+        try:
+            self._service.save_for_structured_search(
+                index_name=request.index,
+                doc_id=request.key,
+                doc_dict=request.doc_json,
+            )
+            return SaveResponse(message="ok")
 
-    async def get_task_status(self, task_id: str) -> dict[str, str]:
-        """查询任务状态"""
-        status = self._task_status.get(task_id, "not_found")
-        return {"task_id": task_id, "status": status}
+        except ValueError as e:
+            # JSON格式验证错误（由Pydantic自动处理）
+            logger.error(f"JSON格式验证失败: {e}")
+            raise HTTPException(
+                status_code=400, detail=f"JSON格式错误: {str(e)}"
+            ) from e
+
+        except RuntimeError as e:
+            # service层抛出的存储错误
+            logger.error(f"文档存储失败: {e}")
+            raise HTTPException(
+                status_code=500, detail="文档存储失败，请稍后重试"
+            ) from e
+
+        except Exception as e:
+            # 其他未预期的异常
+            logger.error(f"保存文档时发生未知错误: {e}")
+            raise HTTPException(status_code=500, detail="服务内部错误") from e

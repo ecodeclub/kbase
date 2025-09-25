@@ -16,6 +16,7 @@ help:
 	@echo "  lint          ✨ 检查代码并自动修复问题"
 	@echo "  type          🔍 类型检查"
 	@echo "  test          🧪 运行测试并生成覆盖率报告"
+	@echo "  cov           🧪 运行测试并打开覆盖率报告"
 	@echo "  run           ▶️  启动开发服务器"
 	@echo "  pre-commit    🔄 运行预提交检查"
 	@echo "  audit         🛡️  扫描依赖中的安全漏洞"
@@ -65,7 +66,12 @@ check: fmt lint type
 
 .PHONY: test
 test:
-	@uv run pytest -q --cov=app --cov-report=term-missing --cov-report=xml
+	@uv run pytest -v --cov=app --cov-report=term-missing --cov-report=xml
+
+.PHONY: cov
+cov: test
+	@echo "🌐 打开覆盖率报告..."
+	@open htmlcov/index.html || xdg-open htmlcov/index.html || echo "请打开: htmlcov/index.html"
 
 .PHONY: audit
 audit:

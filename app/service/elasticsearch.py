@@ -14,16 +14,24 @@
 
 import logging
 import os
+import time
 from datetime import UTC, datetime
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
+from elastic_transport import ObjectApiResponse
 from elasticsearch import Elasticsearch
 from elasticsearch.helpers import bulk
 from langchain_core.documents import Document as LangChainDocument
 
 from app.config.settings import Settings
 from app.domain.document import Document
-from app.domain.search import ContextChunk, SearchRequest, SearchResponse
+from app.domain.search import (
+    DocumentResult,
+    SearchCondition,
+    SearchMode,
+    SearchParameters,
+    SearchResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +65,8 @@ class Reranker(Protocol):
     """重排器接口，负责对初步检索结果进行精排。"""
 
     def rerank(
-        self, query: str, results: list[ContextChunk]
-    ) -> list[ContextChunk]: ...
+        self, query: str, results: list[DocumentResult]
+    ) -> list[DocumentResult]: ...
 
 
 class ElasticsearchService:
@@ -69,31 +77,31 @@ class ElasticsearchService:
         splitter: Splitter,
         embedder: Embedder,
         reranker: Reranker,
-        metadata_index: str,
-        chunk_index: str,
         settings: Settings,
     ) -> None:
-        self.client = client
-        self.loader = loader
-        self.splitter = splitter
-        self.embedder = embedder
-        self.reranker = reranker
-        self.metadata_index = metadata_index
-        self.chunk_index = chunk_index
-        self.settings = settings
-        self._ensure_metadata_index_exists()
-        self._ensure_chunk_index_exists()
+        self._client = client
+        self._loader = loader
+        self._splitter = splitter
+        self._embedder = embedder
+        self._reranker = reranker
+        self._settings = settings
 
-    def _ensure_metadata_index_exists(self) -> None:
+    def _metadata_index_name(self, index_prefix: str) -> str:
+        return index_prefix + self._settings.elasticsearch.metadata_index_suffix
+
+    def _chunk_index_name(self, index_prefix: str) -> str:
+        return index_prefix + self._settings.elasticsearch.chunk_index_suffix
+
+    def _ensure_metadata_index_exists(self, metadata_index: str) -> None:
         """确保索引 metadata_index 存在"""
-        if not self.client.indices.exists(index=self.metadata_index):
+        if not self._client.indices.exists(index=metadata_index):
             body = {
                 "settings": {
-                    "number_of_shards": 1,
-                    "number_of_replicas": 0,
+                    "number_of_shards": self._settings.elasticsearch.number_of_shards,
+                    "number_of_replicas": self._settings.elasticsearch.number_of_replicas,
                     "index": {
-                        "max_result_window": 10000,
-                        "refresh_interval": "1s",
+                        "max_result_window": self._settings.elasticsearch.index_max_result_window,
+                        "refresh_interval": self._settings.elasticsearch.index_refresh_interval,
                     },
                 },
                 "mappings": {
@@ -121,20 +129,20 @@ class ElasticsearchService:
             }
 
             try:
-                self.client.indices.create(index=self.metadata_index, body=body)
+                self._client.indices.create(index=metadata_index, body=body)
             except Exception as e:
                 raise e
 
-    def _ensure_chunk_index_exists(self) -> None:
+    def _ensure_chunk_index_exists(self, chunk_index: str) -> None:
         """确保索引chunk_index存在"""
-        if not self.client.indices.exists(index=self.chunk_index):
+        if not self._client.indices.exists(index=chunk_index):
             body = {
                 "settings": {
-                    "number_of_shards": 1,
-                    "number_of_replicas": 0,
+                    "number_of_shards": self._settings.elasticsearch.number_of_shards,
+                    "number_of_replicas": self._settings.elasticsearch.number_of_replicas,
                     "index": {
-                        "max_result_window": 10000,
-                        "refresh_interval": "1s",
+                        "max_result_window": self._settings.elasticsearch.index_max_result_window,
+                        "refresh_interval": self._settings.elasticsearch.index_refresh_interval,
                     },
                 },
                 "mappings": {
@@ -147,13 +155,13 @@ class ElasticsearchService:
                         },
                         "content_vector": {
                             "type": "dense_vector",
-                            "dims": self.embedder.dimensions,
-                            "similarity": self.embedder.similarity_metric,
+                            "dims": self._embedder.dimensions,
+                            "similarity": self._embedder.similarity_metric,
                             "index": True,
                             "index_options": {
-                                "type": self.settings.embedder.index_type,
-                                "m": 32,
-                                "ef_construction": 100,
+                                "type": self._settings.elasticsearch.index_option_type,
+                                "m": self._settings.elasticsearch.index_option_m,
+                                "ef_construction": self._settings.elasticsearch.index_option_ef_construction,
                             },
                         },
                         "chunk_index": {"type": "integer"},
@@ -167,30 +175,54 @@ class ElasticsearchService:
                 },
             }
             try:
-                self.client.indices.create(index=self.chunk_index, body=body)
+                self._client.indices.create(index=chunk_index, body=body)
             except Exception as e:
                 raise e
 
-    def store(self, document: Document) -> str:
+    def _ensure_indexes_exist(self, index_prefix: str) -> tuple[str, str]:
+        """确保索引存在并返回索引名
+
+        Args:
+            index_prefix: 索引前缀
+
+        Returns:
+            tuple: (metadata_index, chunk_index)
+        """
+        metadata_index = self._metadata_index_name(index_prefix)
+        chunk_index = self._chunk_index_name(index_prefix)
+
+        self._ensure_metadata_index_exists(metadata_index)
+        self._ensure_chunk_index_exists(chunk_index)
+
+        return metadata_index, chunk_index
+
+    def store_for_vector_hybrid_search(self, document: Document) -> str:
         """
         将文档存入双索引系统。
         1. 存储文件元数据到 file_metadatas。
         2. 切分文件为chunks，并将 chunks相关信息 及对应的源文件的 file_metadata_id 存入 file_chunks。
         :return: 在 file_metadatas 中生成的文档 ID。
         """
-        metadata_id = self._create_metadata(document)
+
+        metadata_index, chunk_index = self._ensure_indexes_exist(
+            document.index_prefix
+        )
+        logger.info(
+            f"向量混合搜索： 元数据索引名={metadata_index} 分片索引名={chunk_index}"
+        )
+        metadata_id = self._create_metadata(metadata_index, document)
         document.id = metadata_id  # 确保 document 对象持有 ID
         logger.info(f"元数据占位符创建成功，ID: {metadata_id}")
 
         try:
             # 尝试创建和存储 chunks。失败会抛出异常。
-            created_chunks_count = self._create_chunks(document)
+            created_chunks_count = self._create_chunks(chunk_index, document)
             logger.info(f"成功存储 {created_chunks_count} 个文档块。")
 
             # Chunks 存储成功后，才更新元数据中的 total_chunks
             now_millis = int(datetime.now(UTC).timestamp() * 1000)
-            self.client.update(
-                index=self.metadata_index,
+            self._client.update(
+                index=metadata_index,
                 id=metadata_id,
                 body={
                     "doc": {
@@ -203,20 +235,20 @@ class ElasticsearchService:
             logger.info(
                 f"元数据更新成功，total_chunks 已写入: {created_chunks_count}。"
             )
-            self.client.indices.refresh(index=self.chunk_index)
+            self._client.indices.refresh(index=chunk_index)
             return metadata_id
 
         except Exception as e:
             # 如果上述 try 块中任何一步失败，执行回滚操作
             logger.error(f"文档处理失败，错误: {e}。正在回滚元数据...")
-            self.client.delete(
-                index=self.metadata_index, id=metadata_id, refresh=True
+            self._client.delete(
+                index=metadata_index, id=metadata_id, refresh=True
             )
             logger.info(f"元数据 {metadata_id} 已被成功删除。")
             # 重新抛出异常，让上层调用者知道操作失败
             raise RuntimeError("文档存储失败，已回滚。") from e
 
-    def _create_metadata(self, document: Document) -> str:
+    def _create_metadata(self, metadata_index: str, document: Document) -> str:
         """
         根据文档创建并存储元数据索引数据
         :return: 在 file_metadatas 中生成的文档 ID。
@@ -232,21 +264,21 @@ class ElasticsearchService:
             "created_at": now_millis,
             "updated_at": now_millis,
         }
-        meta_response = self.client.index(
-            index=self.metadata_index, document=doc, refresh="wait_for"
+        meta_response = self._client.index(
+            index=metadata_index, document=doc, refresh="wait_for"
         )
         return str(meta_response["_id"])
 
-    def _create_chunks(self, document: Document) -> int:
+    def _create_chunks(self, chunk_index: str, document: Document) -> int:
         """增强错误处理，支持部分回滚"""
         if not document.id:
             raise ValueError("文档ID未设置")
 
-        chunks = self.splitter.split_documents(self.loader.load(document))
+        chunks = self._splitter.split_documents(self._loader.load(document))
         if not chunks:
             raise RuntimeError("未提取出任何文本块")
 
-        content_vectors = self.embedder.embed_documents(
+        content_vectors = self._embedder.embed_documents(
             [chunk.page_content for chunk in chunks]
         )
 
@@ -258,7 +290,7 @@ class ElasticsearchService:
                 zip(chunks, content_vectors, strict=True)
             ):
                 doc = {
-                    "_index": self.chunk_index,
+                    "_index": chunk_index,
                     "_id": f"{document.id}_{i}",
                     "file_metadata_id": document.id,
                     "content": chunk.page_content,
@@ -273,7 +305,7 @@ class ElasticsearchService:
                 chunk_ids.append(str(doc["_id"]))
 
             success, failed = bulk(
-                client=self.client,
+                client=self._client,
                 actions=chunk_docs,
                 stats_only=False,
                 raise_on_error=False,
@@ -281,7 +313,7 @@ class ElasticsearchService:
 
             if failed:
                 # 清理已成功写入的chunks
-                self._cleanup_chunks(chunk_ids[:success])
+                self._cleanup_chunks(chunk_index, chunk_ids[:success])
                 raise RuntimeError(f"批量写入失败: {failed}")
 
             return success
@@ -289,164 +321,345 @@ class ElasticsearchService:
         except Exception:
             # 确保清理所有可能已写入的chunks
             if chunk_ids:
-                self._cleanup_chunks(chunk_ids)
+                self._cleanup_chunks(chunk_index, chunk_ids)
             raise
 
-    def _cleanup_chunks(self, chunk_ids: list[str]) -> None:
+    def _cleanup_chunks(self, chunk_index: str, chunk_ids: list[str]) -> None:
         """清理指定的chunks"""
         for chunk_id in chunk_ids:
             try:
-                self.client.delete(index=self.chunk_index, id=chunk_id)
+                self._client.delete(index=chunk_index, id=chunk_id)
             except Exception as e:
                 logger.error(f"删除文档分失败，错误: {e}。")
                 pass
 
-    # 在 ElasticsearchService 中添加
-    def delete_document(self, metadata_id: str) -> bool:
-        """删除文档及其所有chunks"""
-        try:
-            # 先删除所有相关chunks
-            self.client.delete_by_query(
-                index=self.chunk_index,
-                body={"query": {"term": {"file_metadata_id": metadata_id}}},
-                refresh=True,
-            )
-            # 删除元数据
-            self.client.delete(
-                index=self.metadata_index, id=metadata_id, refresh=True
-            )
-            return True
-        except Exception as e:
-            logger.error(f"删除文档失败: {e}")
-            return False
+    def search(self, parameters: SearchParameters) -> SearchResult:
+        """
+        执行搜索 - 支持多种搜索模式
 
-    def search(self, request: SearchRequest) -> SearchResponse:
-        """在 file_chunks 索引中执行搜索。"""
-        if not request.query:
-            # 如果查询为空，可以考虑返回最近的文件等，这里暂时返回空
-            return SearchResponse(context=[])
+        Args:
+            parameters: 搜索参数，包含索引、条件、限制等
 
-        standard_query, filter_clause = self._build_filtered_queries(
-            request.query, request.filters
+        Returns:
+            SearchResult: 统一的搜索结果
+        """
+        start_time = time.time()
+
+        # 按搜索模式分类条件
+        search_conditions = self._classify_conditions(parameters.conditions)
+
+        # 根据条件类型构建查询
+        if search_conditions["vector"] and search_conditions["match"]:
+            # 向量+全文混合搜索（兼容旧版本）
+            search_body = self._build_hybrid_search_body(
+                parameters, search_conditions
+            )
+        else:
+            # 纯结构化搜索（新版本）
+            search_body = self._build_structured_search_body(
+                parameters, search_conditions
+            )
+
+        # 执行ES搜索
+        logger.info(f"在 {parameters.index_name} 上执行查询: {search_body}")
+        response = self._client.search(
+            index=parameters.index_name, body=search_body
+        )
+        logger.info(f"查询结果: {response}")
+        # 计算搜索耗时
+        search_time_ms = int((time.time() - start_time) * 1000)
+
+        # 转换为Domain对象并返回
+        return self._convert_to_search_result(
+            response, search_time_ms, parameters.limit, search_conditions
         )
 
-        # 定义召回阶段要获取的文档数量，应大于最终的 top_k
-        # 这是一个超参数，可以根据需求调整
-        retrieval_size = request.top_k * self.settings.retrieval.multiplier
-        query_vector = self.embedder.embed_documents([request.query])[0]
+    @staticmethod
+    def _classify_conditions(
+        conditions: list[SearchCondition],
+    ) -> dict[str, list[SearchCondition]]:
+        """
+        按搜索模式分类条件
 
-        # 使用实用的混合搜索语法：knn + query 组合（兼容 ES 9.x）
-        vector_weight = self.settings.retrieval.vector_weight
-        text_weight = self.settings.retrieval.text_weight
+        Args:
+            conditions: 搜索条件列表
 
-        # 构建搜索体
+        Returns:
+            分类后的条件字典
+        """
+        classified: dict[str, list[SearchCondition]] = {
+            "vector": [],
+            "match": [],
+            "term": [],
+        }
+
+        for condition in conditions:
+            if condition.mode == SearchMode.VECTOR:
+                classified["vector"].append(condition)
+            elif condition.mode == SearchMode.MATCH:
+                classified["match"].append(condition)
+            elif condition.mode == SearchMode.TERM:
+                classified["term"].append(condition)
+
+        return classified
+
+    def _build_hybrid_search_body(
+        self,
+        parameters: SearchParameters,
+        search_conditions: dict[str, list[SearchCondition]],
+    ) -> dict[str, Any]:
+        """
+        构建向量+全文混合搜索查询体（兼容旧版本）
+
+        Args:
+            parameters: 搜索参数
+            search_conditions: 分类后的搜索条件
+
+        Returns:
+            ES查询体
+        """
+        # 获取文本查询进行向量化
+        text_query = cast("str", search_conditions["vector"][0].value)
+
+        # 生成查询向量
+        query_vector = self._embedder.embed_documents([text_query])[0]
+
+        # 计算召回数量（用于后续重排序）
+        k = parameters.limit * self._settings.retrieval.multiplier
+        vector_similarity = self._settings.retrieval.vector_similarity
+
+        # 获取权重配置
+        vector_weight = self._settings.retrieval.vector_weight
+        text_weight = self._settings.retrieval.text_weight
+
+        # # 确保 num_candidates 至少为 k 的 2 倍或 100，取较大值
+        num_candidates = max(k * 2, 100)
+
+        # 构建混合搜索查询体
         search_body: dict[str, Any] = {
-            "size": retrieval_size,
-            "_source": ["content", "file_metadata_id"],
+            "size": parameters.limit,
+            "_source": ["content", "file_metadata_id"],  # 只返回需要的字段
             "knn": {
-                "field": "content_vector",
+                "field": "content_vector",  # 固定向量字段
                 "query_vector": query_vector,
-                "k": retrieval_size,
-                "num_candidates": 100,
+                "k": k,
+                "num_candidates": num_candidates,
                 "boost": vector_weight,
+                "similarity": vector_similarity,
             },
             "query": {
                 "bool": {
-                    "should": [
+                    "must": [
                         {
                             "match": {
                                 "content": {
-                                    "query": request.query,
-                                    "boost": text_weight * 0.5,
+                                    "query": text_query,
+                                    "boost": text_weight * 0.7,  # 基础匹配权重
                                 }
                             }
-                        },
+                        }
+                    ],
+                    "should": [
                         {
                             "match_phrase": {
                                 "content": {
-                                    "query": request.query,
-                                    "boost": text_weight * 0.3,
+                                    "query": text_query,
+                                    "boost": text_weight * 0.3,  # 短语匹配加分
                                 }
                             }
-                        },
+                        }
                     ],
-                    "minimum_should_match": 0,
+                    "minimum_should_match": 0,  # should是纯加分项
                 }
             },
         }
 
-        # 如果有过滤条件，添加到搜索体中
-        if filter_clause:
-            # 为 knn 添加过滤器
-            search_body["knn"]["filter"] = filter_clause
-            # 为 query 添加过滤器
-            search_body["query"]["bool"]["filter"] = filter_clause
+        # 添加过滤条件
+        if parameters.filters:
+            # 为knn查询添加过滤器
+            search_body["knn"]["filter"] = parameters.filters
+            # 为全文查询添加过滤器
+            search_body["query"]["bool"]["filter"] = parameters.filters
 
-        # 执行混合搜索
-        response = self.client.search(index=self.chunk_index, body=search_body)
+        return search_body
 
-        # 格式化召回结果
-        retrieved_chunks = [
-            ContextChunk(
-                text=hit["_source"]["content"],
-                file_metadata_id=hit["_source"]["file_metadata_id"],
+    @staticmethod
+    def _build_structured_search_body(
+        parameters: SearchParameters,
+        search_conditions: dict[str, list[SearchCondition]],
+    ) -> dict[str, Any]:
+        """
+        构建结构化搜索查询体（新版本）
+
+        Args:
+            parameters: 搜索参数
+            search_conditions: 分类后的搜索条件
+
+        Returns:
+            ES查询体
+        """
+        bool_query: dict[str, Any] = {"bool": {"must": []}}
+
+        # 添加MATCH查询条件
+        for condition in search_conditions["match"]:
+            bool_query["bool"]["must"].append(
+                {"match": {condition.field_name: {"query": condition.value}}}
+            )
+
+        # 添加TERM查询条件
+        for condition in search_conditions["term"]:
+            bool_query["bool"]["must"].append(
+                {"term": {condition.field_name: condition.value}}
+            )
+
+        search_body: dict[str, Any] = {
+            "size": parameters.limit,
+            "query": bool_query,
+        }
+
+        # 添加过滤条件
+        if parameters.filters:
+            bool_query["bool"]["filter"] = parameters.filters
+
+        return search_body
+
+    def _convert_to_search_result(
+        self,
+        response: ObjectApiResponse[Any],
+        search_time_ms: int,
+        limit: int,
+        search_conditions: dict[str, list[SearchCondition]],
+    ) -> SearchResult:
+        """
+        将ES响应转换为Domain搜索结果
+
+        Args:
+            response: ES查询响应
+            search_time_ms: 搜索耗时（毫秒）
+            limit: 限制返回结果的个数
+            search_conditions: 分类后的搜索条件
+
+        Returns:
+            SearchResult: Domain层搜索结果
+        """
+        hits = response["hits"]["hits"]
+
+        # 获取总数
+        total_count: int = 0
+        if isinstance(response["hits"]["total"], dict):
+            total_count = response["hits"]["total"]["value"]
+
+        # 判断是否为混合搜索
+        is_hybrid_search = bool(
+            search_conditions["vector"] and search_conditions["match"]
+        )
+
+        # 根据搜索类型处理结果
+        if is_hybrid_search:
+            documents = self._process_hybrid_search_results(
+                cast("str", search_conditions["vector"][0].value), hits
+            )
+        else:
+            documents = self._process_structured_search_results(hits)
+
+        return SearchResult(
+            documents=documents,
+            total_count=total_count,
+            search_time_ms=search_time_ms,
+        )
+
+    def _process_hybrid_search_results(
+        self,
+        text_query: str,
+        hits: list[dict[str, Any]],
+    ) -> list[DocumentResult]:
+        """
+        处理混合搜索结果：去重 + 重排序
+
+        Args:
+            hits: ES查询命中结果
+
+        Returns:
+            处理后的文档结果列表
+        """
+
+        chunks = [
+            DocumentResult(
+                content=hit["_source"],
                 score=hit["_score"] if hit["_score"] is not None else 0.0,
             )
-            for hit in response["hits"]["hits"]
+            for hit in hits
         ]
 
-        # 去重
+        # 去重处理
         seen = set()
         unique_chunks = []
-        for chunk in retrieved_chunks:
-            identifier = (chunk.text, chunk.file_metadata_id)
+
+        for chunk in chunks:
+            identifier = (
+                chunk.content["content"],
+                chunk.content["file_metadata_id"],
+            )
             if identifier not in seen:
                 seen.add(identifier)
                 unique_chunks.append(chunk)
 
         # 重排
-        reranked_chunks = self.reranker.rerank(request.query, unique_chunks)
-
-        # 截取最终的 top_k
-        final_context = reranked_chunks[: request.top_k]
-
-        return SearchResponse(context=final_context)
+        return self._reranker.rerank(text_query, unique_chunks)
 
     @staticmethod
-    def _build_filtered_queries(
-        query: str, filters: dict[str, Any] | None
-    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    def _process_structured_search_results(
+        hits: list[dict[str, Any]],
+    ) -> list[DocumentResult]:
         """
-        根据用户查询和过滤器，动态构建用于 standard 和 knn 检索器的查询。
+        处理结构化搜索结果：直接转换
 
-        :param query: 用户的查询字符串。
-        :param filters: 一个包含字段和期望值的字典，用于过滤。
-        :return: 一个元组，包含:
-                 - standard_query (dict): 用于 standard retriever 的完整查询体。
-                 - knn_filter (list): 用于 knn retriever 的过滤器列表。
+        Args:
+            hits: ES查询命中结果
+
+        Returns:
+            文档结果列表
         """
-        # 准备 standard retriever 的核心 query 部分 (match query)
-        standard_query_part = {
-            "match": {"content": {"query": query, "boost": 0.5}}
-        }
+        documents = []
+        for hit in hits:
+            documents.append(
+                DocumentResult(
+                    id=hit["_id"],  # 使用ES文档ID
+                    content=hit["_source"],  # 完整文档内容
+                    score=hit["_score"] if hit["_score"] is not None else 0.0,
+                )
+            )
+        return documents
 
-        # 根据 filters 构建 filter_clause
-        filter_clause: list[dict[str, Any]] = []
-        if filters:
-            for field, value in filters.items():
-                if isinstance(value, list):
-                    filter_clause.append({"terms": {field: value}})
-                else:
-                    filter_clause.append({"term": {field: value}})
+    def save_for_structured_search(
+        self, index_name: str, doc_id: str, doc_dict: dict[str, Any]
+    ) -> None:
+        """
+        保存文档到Elasticsearch索引，如果文档已存在则整体覆盖
 
-        # 简单情况：如果没有过滤器，直接返回最简单的查询
-        if not filter_clause:
-            # 此处 standard_query_part 就是最终的查询
-            return standard_query_part, filter_clause
+        Args:
+            index_name: ES索引名称
+            doc_id: 文档ID
+            doc_dict: 文档内容字典
 
-        # 构建复杂的 bool 查询并返回
-        standard_query = {
-            "bool": {"must": [standard_query_part], "filter": filter_clause}
-        }
+        Raises:
+            RuntimeError: 文档存储失败时抛出
+        """
+        try:
+            # 插入或完整覆盖
+            response = self._client.index(
+                index=index_name,
+                id=doc_id,
+                document=doc_dict,
+                refresh="wait_for",
+            )
+            # 记录操作结果
+            operation = (
+                "创建" if response.get("result") == "created" else "覆盖"
+            )
+            logger.info(f"文档 {doc_id} 在索引 {index_name} 中{operation}成功")
 
-        return standard_query, filter_clause
+        except Exception as e:
+            error_msg = f"文档存储失败 - 索引: {index_name}, 文档ID: {doc_id}"
+            logger.error(f"{error_msg}，错误: {e}")
+            raise RuntimeError(f"{error_msg}: {str(e)}") from e
