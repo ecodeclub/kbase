@@ -50,7 +50,7 @@ make setup
 ```
 
 `make setup` 会自动：
-- ✅ 创建 Python 3.13 虚拟环境
+- ✅ 创建 Python 虚拟环境
 - ✅ 安装所有依赖（包括开发工具）
 - ✅ 配置 Git 预提交钩子
 
