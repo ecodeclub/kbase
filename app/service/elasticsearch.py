@@ -374,6 +374,12 @@ class ElasticsearchService:
             response, search_time_ms, parameters.limit, search_conditions
         )
 
+    def es_search(
+        self, index_name: str, query: dict[str, Any]
+    ) -> dict[str, Any]:
+        resp = self._client.search(index=index_name, body=query)
+        return dict(resp.body)
+
     @staticmethod
     def _classify_conditions(
         conditions: list[SearchCondition],

@@ -17,6 +17,7 @@ import logging
 import shutil
 import uuid
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 from elasticsearch import NotFoundError
@@ -38,6 +39,7 @@ from app.domain.document import Document
 from app.service.elasticsearch import ElasticsearchService
 from app.utils.converters import SearchConverter
 from app.web.vo import (
+    ESSearchRequest,
     FileUploadResponse,
     SaveRequest,
     SaveResponse,
@@ -115,6 +117,11 @@ class DocumentHandler:
             response_model=SearchResponse,
             summary="在知识库中进行搜索",
         )(self.search)
+
+        self._router.post(
+            "/es_search",
+            summary="使用传递过来的es查询语句在知识库中直接搜索",
+        )(self.es_search)
 
         self._router.post(
             "/documents/save",
@@ -433,6 +440,21 @@ class DocumentHandler:
         except NotFoundError as e:
             raise HTTPException(
                 status_code=404, detail=f"索引 {request.query.index} 不存在"
+            ) from e
+        except Exception as e:
+            logger.error(f"❌ 搜索失败: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail="搜索处理失败") from e
+
+    async def es_search(self, request: ESSearchRequest) -> dict[str, Any]:
+        """通过ES语法搜索文档接口"""
+        try:
+            logger.info(
+                f"🔍 收到ES搜索请求: index='{request.index}', query='{request.query}'"
+            )
+            return self._service.es_search(request.index, request.query)
+        except NotFoundError as e:
+            raise HTTPException(
+                status_code=404, detail=f"索引 {request.index} 不存在"
             ) from e
         except Exception as e:
             logger.error(f"❌ 搜索失败: {e}", exc_info=True)
