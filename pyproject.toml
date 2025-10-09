@@ -1,25 +1,27 @@
 [project]
 name = "kbase"
 version = "0.1.0"
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.13"
 dependencies = [
     "cos-python-sdk-v5>=1.9.38",
     "elasticsearch>=9.1.0",
-    "fastapi>=0.116.1",
+    "fastapi>=0.118.2",
     "gunicorn>=23.0.0",
     "langchain>=0.3.27",
-    "langchain-community>=0.3.29",
+    "langchain-community>=0.3.31",
     "mistune>=3.1.4",
-    "numpy>=1.24,<2.0",
+    "numpy>=2.3.3",
     "pdfplumber>=0.11.7",
+    "pydantic>=2.12.0",
     "pydantic-settings>=2.10.1",
     "pypdf>=6.0.0",
     "python-multipart>=0.0.20",
     "pyyaml>=6.0.2",
+    "ruff>=0.14.0",
     "scipy>=1.16.1",
-    "sentence-transformers>=2.3.0,<2.7.0",
-    "torch>=2.1.0",
-    "transformers>=4.35.0,<4.50.0",
+    "sentence-transformers>=5.1.1",
+    "torch>=2.8.0",
+    "transformers>=4.57.0",
     "unstructured[docx,pdf,pptx,xlsx]>=0.18.14",
     "uvicorn>=0.35.0",
 ]
@@ -41,7 +43,7 @@ dev = [
 
 [tool.ruff]
 line-length = 80
-target-version = "py312"
+target-version = "py313"
 lint.extend-select = [
     "B",    # flake8-bugbear
     "I",    # isort
@@ -71,7 +73,7 @@ suppress-none-returning = false # 检查返回None的函数
 strict = true                   # 严格的类型导入检查
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.13"
 packages = ["app", "tests"]
 strict = true
 warn_unreachable = true           # 警告无法到达的代码
@@ -103,7 +105,3 @@ python_classes = "Test*"
 python_functions = "test_*"
 
 [tool.uv]
-required-environments = [
-    "sys_platform == 'darwin' and platform_machine == 'arm64'",
-    "sys_platform == 'darwin' and platform_machine == 'x86_64'"
-]
