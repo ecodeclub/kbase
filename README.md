@@ -16,7 +16,7 @@
 
 ### 环境要求
 
-- **Python**: 3.13
+- **Python**: 3.x
 - **uv**: 现代Python包管理器（强烈推荐）
 - **Elasticsearch**: 9.x（用于文档存储和搜索）
 
@@ -304,22 +304,22 @@ Docker 打包的时候，忽略掉了很多文件，具体可以参考项目下�
 - 更新项目元数据 [project]:
 
 ```diff
-- requires-python = ">=3.13"
-+ requires-python = ">=3.14"
+- requires-python = ">=3.12"
++ requires-python = ">=3.13"
 ```
 
 - 更新 Ruff 配置 [tool.ruff]:
 
 ```diff
-- target-version = "py313"
-+ target-version = "py314"
+- target-version = "py312"
++ target-version = "py313"
 ```
 
 - 更新 MyPy 配置 [tool.mypy]:
 
 ```diff
-- python_version = "3.13"
-+ python_version = "3.14"
+- python_version = "3.12"
++ python_version = "3.13"
 ```
 
 2. 使用 uv 重建虚拟环境
@@ -329,9 +329,9 @@ Docker 打包的时候，忽略掉了很多文件，具体可以参考项目下�
 # 1. (推荐) 删除旧的虚拟环境，确保一个完全纯净的开始
 rm -rf .venv
 
-# 2. 使用 uv 创建一个指向 Python 3.14 的新虚拟环境
-# uv 会自动在系统中寻找 3.14。如果找不到，它会下载一个！
-uv venv --python 3.14
+# 2. 使用 uv 创建一个指向 Python 3.13 的新虚拟环境
+# uv 会自动在系统中寻找 3.13。如果找不到，它会下载一个！
+uv venv --python 3.13
 
 # 3. 激活新创建的环境
 source .venv/bin/activate
