@@ -130,6 +130,11 @@ class SearchRequest(BaseModel):
         return v
 
 
+class ESSearchRequest(BaseModel):
+    index: str = Field(..., min_length=1, description="ES索引名称")
+    query: dict[str, Any] = Field(..., description="符合ES语法规范的查询语句")
+
+
 class VectorHybridSearchResult(BaseModel):
     """向量+全文混合搜索结果"""
 
