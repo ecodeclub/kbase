@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from sentence_transformers import SentenceTransformer
+
 
 class SentenceTransformerEmbedder:
     def __init__(self, model_name: str, similarity: str) -> None:
@@ -20,8 +22,6 @@ class SentenceTransformerEmbedder:
         :param model_name: 模型名称
         :param similarity: 相似性算法名称 cosine，dot_product
         """
-        from sentence_transformers import SentenceTransformer
-
         self.model = SentenceTransformer(model_name)
         self._similarity = similarity
 
@@ -30,7 +30,12 @@ class SentenceTransformerEmbedder:
 
     @property
     def dimensions(self) -> int:
-        return int(self.model.get_sentence_embedding_dimension())
+        d = self.model.get_sentence_embedding_dimension()
+        if d is None:
+            raise RuntimeError(
+                "SentenceTransformerEmbedder: dimension cannot be None"
+            )
+        return d
 
     @property
     def similarity_metric(self) -> str:

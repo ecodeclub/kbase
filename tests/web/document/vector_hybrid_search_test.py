@@ -42,7 +42,7 @@ class TestVectorHybridSearch:
         self,
         client: TestClient,
         es_client: Elasticsearch,
-    ) -> Generator[None, Any, None]:
+    ) -> Generator[None, Any]:
         """准备测试环境（索引+数据）"""
 
         # 1. 清理已存在的索引

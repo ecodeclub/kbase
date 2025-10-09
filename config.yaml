@@ -12,7 +12,7 @@ elasticsearch:
   request_timeout: 60
 
 embedder:
-  model_name: "shibing624/text2vec-base-chinese" # "BAAI/bge-base-zh-v1.5"
+  model_name: "BAAI/bge-base-zh-v1.5 " # "shibing624/text2vec-base-chinese" # "BAAI/bge-base-zh-v1.5"
   dimensions: 768
   similarity_metric: "cosine"
   index_type: "int8_hnsw" # 可选: "int8_hnsw", "hnsw", "flat"

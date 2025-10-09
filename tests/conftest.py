@@ -84,14 +84,14 @@ def get_user_upload_file(
 
 
 @pytest.fixture(scope="module")
-def client() -> Generator[TestClient, Any, None]:
+def client() -> Generator[TestClient, Any]:
     """V2 API 测试客户端"""
     with TestClient(app) as test_client:
         yield test_client
 
 
 @pytest.fixture(scope="session")
-def es_client() -> Generator[Elasticsearch, Any, None]:
+def es_client() -> Generator[Elasticsearch, Any]:
     """
     Elasticsearch客户端 - 用于测试ES相关操作
     """

@@ -30,7 +30,7 @@ class TestSaveEndpoint:
     @pytest.fixture(scope="class", autouse=True)
     def setup_test_index(
         self, es_client: Elasticsearch
-    ) -> Generator[None, Any, None]:
+    ) -> Generator[None, Any]:
         """设置测试索引"""
         # 如果索引存在则删除（清理之前的测试）
         if es_client.indices.exists(index=self.TEST_INDEX):
